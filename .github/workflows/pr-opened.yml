@@ -1,0 +1,155 @@
+name: PR Opened
+
+on:
+  pull_request:
+    types: [opened]
+
+# Minimal GITHUB_TOKEN permissions — all API calls use GH_PAT.
+permissions:
+  pull-requests: read
+
+jobs:
+  link-to-issue:
+    name: Link PR to project issue and move to In Review
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ------------------------------------------------------------------
+      # Single step handles the full flow:
+      #   1. Identify PR author (Devin bot vs human)
+      #   2. Parse linked issue from PR body
+      #   3. Look up the issue's current Status on the board
+      #   4. Move to In Review if preconditions are met
+      #   5. Comment on issue (Devin path only)
+      #
+      # Preconditions that gate the move:
+      #   Devin PR : issue must be in "Devin PR"   status
+      #   Human PR : issue must be in "In Progress" status
+      #
+      # If any expected data is missing, log and exit 0 (don't fail the run).
+      # ------------------------------------------------------------------
+      - name: Find linked issue and move to In Review
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO_OWNER: ${{ vars.PROJECT_OWNER }}
+          REPO_NAME: ghostfolio
+        run: |
+          source .env.project
+
+          # ----------------------------------------------------------------
+          # 1. Detect author type.
+          #    NOTE: Verify the exact bot login after the first Devin PR —
+          #    it may differ if using a custom GitHub App install.
+          # ----------------------------------------------------------------
+          DEVIN_BOT="devin-ai-integration[bot]"
+          if [[ "$PR_AUTHOR" == "$DEVIN_BOT" ]]; then
+            IS_DEVIN=true
+            EXPECTED_STATUS="Devin PR"
+          else
+            IS_DEVIN=false
+            EXPECTED_STATUS="In Progress"
+          fi
+          echo "Author : ${PR_AUTHOR} (is_devin=${IS_DEVIN})"
+          echo "Expects: issue to be in \"${EXPECTED_STATUS}\" to trigger a move"
+
+          # ----------------------------------------------------------------
+          # 2. Parse "closes #N", "fixes #N", or "resolves #N" from PR body.
+          #    Covers both capitalised and lowercase forms; takes the first match.
+          # ----------------------------------------------------------------
+          ISSUE_NUMBER=$(echo "$PR_BODY" \
+            | grep -iEo '(closes|fixes|resolves)[[:space:]]+#[0-9]+' \
+            | grep -Eo '[0-9]+$' \
+            | head -1)
+
+          if [[ -z "$ISSUE_NUMBER" ]]; then
+            echo "No linked issue found in PR #${PR_NUMBER} body — nothing to update."
+            exit 0
+          fi
+          echo "Linked issue: #${ISSUE_NUMBER}"
+
+          # ----------------------------------------------------------------
+          # 3. Look up the issue's node ID and its current Status on the board
+          #    in a single GraphQL call.
+          #    Empty fieldValue nodes (non-single-select fields) are filtered
+          #    by selecting only nodes where .field is non-null.
+          # ----------------------------------------------------------------
+          ISSUE_DATA=$(gh api graphql \
+            -H "Authorization: Bearer ${GH_PAT}" \
+            -f query='
+          {
+            repository(owner: "'"${REPO_OWNER}"'", name: "'"${REPO_NAME}"'") {
+              issue(number: '"${ISSUE_NUMBER}"') {
+                id
+                projectItems(first: 20) {
+                  nodes {
+                    id
+                    project { id }
+                    fieldValues(first: 20) {
+                      nodes {
+                        ... on ProjectV2ItemFieldSingleSelectValue {
+                          name
+                          field { ... on ProjectV2SingleSelectField { id name } }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }')
+
+          ISSUE_NODE_ID=$(echo "$ISSUE_DATA" | jq -r '.data.repository.issue.id // empty')
+
+          if [[ -z "$ISSUE_NODE_ID" ]]; then
+            echo "Issue #${ISSUE_NUMBER} not found in ${REPO_OWNER}/${REPO_NAME} — skipping."
+            exit 0
+          fi
+
+          # Extract current Status from the project item belonging to our project.
+          CURRENT_STATUS=$(echo "$ISSUE_DATA" | jq -r \
+            --arg pid "$PROJECT_ID" \
+            '.data.repository.issue.projectItems.nodes[]
+             | select(.project.id == $pid)
+             | .fieldValues.nodes[]
+             | select(.field != null and .field.name == "Status")
+             | .name // empty')
+
+          if [[ -z "$CURRENT_STATUS" ]]; then
+            echo "Issue #${ISSUE_NUMBER} is not tracked in project ${PROJECT_ID} — skipping."
+            exit 0
+          fi
+          echo "Current status: \"${CURRENT_STATUS}\""
+
+          # ----------------------------------------------------------------
+          # 4. Move to In Review if the issue is in the expected state.
+          #    Idempotent: if already In Review, move-issue-status.sh is a no-op
+          #    at the API level (same option ID written again).
+          # ----------------------------------------------------------------
+          if [[ "$CURRENT_STATUS" != "$EXPECTED_STATUS" ]]; then
+            echo "Issue #${ISSUE_NUMBER} is in \"${CURRENT_STATUS}\", expected \"${EXPECTED_STATUS}\" — skipping move."
+            exit 0
+          fi
+
+          echo "Moving issue #${ISSUE_NUMBER} to In Review..."
+          ISSUE_NODE_ID="$ISSUE_NODE_ID" TARGET_STATUS="In Review" \
+            bash scripts/move-issue-status.sh
+
+          # ----------------------------------------------------------------
+          # 5. (Devin path only) Comment on the issue so the team knows
+          #    which PR to review.
+          # ----------------------------------------------------------------
+          if [[ "$IS_DEVIN" == "true" ]]; then
+            echo "Posting comment on issue #${ISSUE_NUMBER}..."
+            gh api \
+              -H "Authorization: Bearer ${GH_PAT}" \
+              -X POST \
+              "/repos/${REPO_OWNER}/${REPO_NAME}/issues/${ISSUE_NUMBER}/comments" \
+              -f body="Devin has opened a PR: #${PR_NUMBER}"
+            echo "Comment posted."
+          fi
