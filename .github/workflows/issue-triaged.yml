@@ -14,6 +14,9 @@ jobs:
     runs-on: ubuntu-latest
     # Skip immediately for any label that isn't part of this pipeline.
     if: github.event.label.name == 'devin' || github.event.label.name == 'human'
+    # gh CLI requires GH_TOKEN in Actions context even when -H is passed.
+    env:
+      GH_TOKEN: ${{ secrets.GH_PAT }}
 
     steps:
       - name: Checkout

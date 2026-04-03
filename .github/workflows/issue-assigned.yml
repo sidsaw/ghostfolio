@@ -15,6 +15,9 @@ jobs:
     # Skip immediately if the devin label is present — Devin issues move
     # through issue-triaged.yml (Backlog → Devin PR), not this path.
     if: "!contains(github.event.issue.labels.*.name, 'devin')"
+    # gh CLI requires GH_TOKEN in Actions context even when -H is passed.
+    env:
+      GH_TOKEN: ${{ secrets.GH_PAT }}
 
     steps:
       - name: Checkout
