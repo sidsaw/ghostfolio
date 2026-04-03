@@ -1,0 +1,83 @@
+name: PR Merged
+
+on:
+  pull_request:
+    types: [closed]
+
+# Minimal GITHUB_TOKEN permissions — all API calls use GH_PAT.
+permissions:
+  pull-requests: read
+
+jobs:
+  close-issue:
+    name: Move linked issue to Done and close it
+    runs-on: ubuntu-latest
+    # Only run when the PR was actually merged, not just closed/abandoned.
+    if: github.event.pull_request.merged == true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Find linked issue, set Done, and close
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO_OWNER: ${{ vars.PROJECT_OWNER }}
+          REPO_NAME: ghostfolio
+        run: |
+          source .env.project
+
+          # ----------------------------------------------------------------
+          # 1. Parse "closes #N", "fixes #N", or "resolves #N" from PR body.
+          # ----------------------------------------------------------------
+          ISSUE_NUMBER=$(echo "$PR_BODY" \
+            | grep -iEo '(closes|fixes|resolves)[[:space:]]+#[0-9]+' \
+            | grep -Eo '[0-9]+$' \
+            | head -1)
+
+          if [[ -z "$ISSUE_NUMBER" ]]; then
+            echo "No linked issue found in PR #${PR_NUMBER} body — nothing to update."
+            exit 0
+          fi
+          echo "Linked issue: #${ISSUE_NUMBER}"
+
+          # ----------------------------------------------------------------
+          # 2. Resolve the issue node ID (needed by move-issue-status.sh).
+          # ----------------------------------------------------------------
+          ISSUE_NODE_ID=$(gh api graphql \
+            -H "Authorization: Bearer ${GH_PAT}" \
+            -f query='
+          {
+            repository(owner: "'"${REPO_OWNER}"'", name: "'"${REPO_NAME}"'") {
+              issue(number: '"${ISSUE_NUMBER}"') { id }
+            }
+          }' | jq -r '.data.repository.issue.id // empty')
+
+          if [[ -z "$ISSUE_NODE_ID" ]]; then
+            echo "Issue #${ISSUE_NUMBER} not found in ${REPO_OWNER}/${REPO_NAME} — skipping."
+            exit 0
+          fi
+          echo "Issue node ID: ${ISSUE_NODE_ID}"
+
+          # ----------------------------------------------------------------
+          # 3. Move Status to Done on the project board.
+          #    move-issue-status.sh exits non-zero if the issue isn't in the
+          #    project, which is the right behaviour — a merged PR that links
+          #    an untracked issue is unexpected and worth surfacing.
+          # ----------------------------------------------------------------
+          ISSUE_NODE_ID="$ISSUE_NODE_ID" TARGET_STATUS="Done" \
+            bash scripts/move-issue-status.sh
+
+          # ----------------------------------------------------------------
+          # 4. Close the issue.
+          #    gh issue close is idempotent — closing an already-closed
+          #    issue exits 0 with no changes. GH_TOKEN is how gh CLI auth
+          #    works for non-graphql commands.
+          # ----------------------------------------------------------------
+          echo "Closing issue #${ISSUE_NUMBER}..."
+          GH_TOKEN="${GH_PAT}" gh issue close "$ISSUE_NUMBER" \
+            --repo "${REPO_OWNER}/${REPO_NAME}" \
+            --comment "Closed by PR #${PR_NUMBER}."
+          echo "Issue #${ISSUE_NUMBER} closed."
