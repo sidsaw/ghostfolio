@@ -1,0 +1,82 @@
+name: Issue Opened
+
+on:
+  issues:
+    types: [opened]
+
+# Minimal permissions for GITHUB_TOKEN — all project mutations use GH_PAT.
+permissions:
+  issues: write   # needed to apply the triage label
+
+jobs:
+  triage:
+    name: Add to project and label
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ------------------------------------------------------------------
+      # 1. Add issue to the GitHub Project v2
+      #    addProjectV2ItemById is idempotent — safe to re-run.
+      # ------------------------------------------------------------------
+      - name: Add issue to project
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          PROJECT_NUMBER: ${{ vars.PROJECT_NUMBER }}
+          PROJECT_OWNER: ${{ vars.PROJECT_OWNER }}
+          ISSUE_NODE_ID: ${{ github.event.issue.node_id }}
+        run: |
+          # Load field IDs from the committed .env.project file.
+          if [[ ! -f .env.project ]]; then
+            echo "ERROR: .env.project not found. Run scripts/setup-project.sh and commit the file." >&2
+            exit 1
+          fi
+          source .env.project
+
+          # Verify PROJECT_ID was loaded.
+          if [[ -z "${PROJECT_ID:-}" ]]; then
+            echo "ERROR: PROJECT_ID missing from .env.project" >&2
+            exit 1
+          fi
+
+          echo "Adding issue ${ISSUE_NODE_ID} to project ${PROJECT_ID}..."
+          gh api graphql \
+            -H "Authorization: Bearer ${GH_PAT}" \
+            -f query='
+          mutation {
+            addProjectV2ItemById(input: {
+              projectId: "'"${PROJECT_ID}"'"
+              contentId: "'"${ISSUE_NODE_ID}"'"
+            }) {
+              item { id }
+            }
+          }' | jq -e '.data.addProjectV2ItemById.item.id' > /dev/null
+
+          echo "Issue added to project."
+
+      # ------------------------------------------------------------------
+      # 2. Set Status = Inbox via the shared helper script.
+      #    The helper sources .env.project automatically.
+      # ------------------------------------------------------------------
+      - name: Set Status to Inbox
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          ISSUE_NODE_ID: ${{ github.event.issue.node_id }}
+          TARGET_STATUS: Inbox
+        run: bash scripts/move-issue-status.sh
+
+      # ------------------------------------------------------------------
+      # 3. Apply the triage label so the team knows this needs review.
+      #    Uses GH_PAT to stay consistent; falls back gracefully if the
+      #    label doesn't exist yet (gh will create it if --force is set,
+      #    but we want an explicit error if setup was skipped).
+      # ------------------------------------------------------------------
+      - name: Apply triage label
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          gh issue edit ${{ github.event.issue.number }} \
+            --add-label triage \
+            --repo ${{ github.repository }}
