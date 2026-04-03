@@ -30,10 +30,14 @@ import { ExchangeRatesByCurrency } from './interfaces/exchange-rate-data.interfa
 
 @Injectable()
 export class ExchangeRateDataService {
+  private static readonly EXCHANGE_RATES_TTL = ms('2 hours');
+
   private currencies: string[] = [];
   private currencyPairs: DataGatheringItem[] = [];
   private derivedCurrencyFactors: { [currencyPair: string]: number } = {};
   private exchangeRates: { [currencyPair: string]: number } = {};
+  private exchangeRatesLastUpdatedAt = 0;
+  private exchangeRatesRefreshPromise: Promise<void> | undefined;
 
   public constructor(
     private readonly dataProviderService: DataProviderService,
@@ -160,6 +164,25 @@ export class ExchangeRateDataService {
     await this.loadCurrencies();
   }
 
+  public async ensureRecentExchangeRates(): Promise<void> {
+    const now = Date.now();
+
+    if (
+      now - this.exchangeRatesLastUpdatedAt <
+      ExchangeRateDataService.EXCHANGE_RATES_TTL
+    ) {
+      return;
+    }
+
+    if (!this.exchangeRatesRefreshPromise) {
+      this.exchangeRatesRefreshPromise = this.loadCurrencies().finally(() => {
+        this.exchangeRatesRefreshPromise = undefined;
+      });
+    }
+
+    return this.exchangeRatesRefreshPromise;
+  }
+
   public async loadCurrencies() {
     const result = await this.dataProviderService.getHistorical(
       this.currencyPairs,
@@ -218,6 +241,8 @@ export class ExchangeRateDataService {
           1 / this.exchangeRates[symbol];
       }
     }
+
+    this.exchangeRatesLastUpdatedAt = Date.now();
   }
 
   public toCurrency(

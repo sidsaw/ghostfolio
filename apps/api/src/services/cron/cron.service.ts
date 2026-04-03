@@ -36,8 +36,8 @@ export class CronService {
     }
   }
 
-  @Cron(CronExpression.EVERY_12_HOURS)
-  public async runEveryTwelveHours() {
+  @Cron(CronExpression.EVERY_2_HOURS)
+  public async runEveryTwoHours() {
     await this.exchangeRateDataService.loadCurrencies();
   }
 

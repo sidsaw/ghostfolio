@@ -127,6 +127,8 @@ export class PortfolioService {
     userId: string;
     withExcludedAccounts?: boolean;
   }): Promise<AccountWithValue[]> {
+    await this.exchangeRateDataService.ensureRecentExchangeRates();
+
     const where: Prisma.AccountWhereInput = { userId };
 
     const filterByAccount = filters?.find(({ type }) => {
@@ -481,6 +483,8 @@ export class PortfolioService {
     withMarkets?: boolean;
     withSummary?: boolean;
   }): Promise<PortfolioDetails & { hasErrors: boolean }> {
+    await this.exchangeRateDataService.ensureRecentExchangeRates();
+
     userId = await this.getUserId(impersonationId, userId);
     const user = await this.userService.user({ id: userId });
     const userCurrency = this.getUserCurrency(user);
@@ -775,6 +779,8 @@ export class PortfolioService {
     symbol: string;
     userId: string;
   }): Promise<PortfolioHoldingResponse> {
+    await this.exchangeRateDataService.ensureRecentExchangeRates();
+
     userId = await this.getUserId(impersonationId, userId);
     const user = await this.userService.user({ id: userId });
     const userCurrency = this.getUserCurrency(user);
@@ -1000,6 +1006,8 @@ export class PortfolioService {
     userId: string;
     withExcludedAccounts?: boolean;
   }): Promise<PortfolioPerformanceResponse> {
+    await this.exchangeRateDataService.ensureRecentExchangeRates();
+
     userId = await this.getUserId(impersonationId, userId);
     const user = await this.userService.user({ id: userId });
     const userCurrency = this.getUserCurrency(user);
