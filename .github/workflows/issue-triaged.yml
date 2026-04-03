@@ -4,17 +4,14 @@ on:
   issues:
     types: [labeled]
 
-# Minimal GITHUB_TOKEN permissions — all project mutations use GH_PAT.
 permissions:
-  issues: write   # needed to remove the triage label
+  issues: write
 
 jobs:
   triage:
-    name: Move to Backlog and optionally dispatch to Devin
+    name: Move to Backlog
     runs-on: ubuntu-latest
-    # Skip immediately for any label that isn't part of this pipeline.
-    if: github.event.label.name == 'devin' || github.event.label.name == 'human'
-    # gh CLI requires GH_TOKEN in Actions context even when -H is passed.
+    if: github.event.label.name == 'human'
     env:
       GH_TOKEN: ${{ secrets.GH_PAT }}
 
@@ -22,13 +19,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ------------------------------------------------------------------
-      # 1. Remove the triage label (it's been triaged now).
-      #    Tolerate the label already being absent — don't fail the run.
-      # ------------------------------------------------------------------
       - name: Remove triage label
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
           gh issue edit ${{ github.event.issue.number }} \
             --remove-label triage \
@@ -36,10 +27,6 @@ jobs:
             && echo "triage label removed." \
             || echo "triage label was not present — skipping."
 
-      # ------------------------------------------------------------------
-      # 2. Set Status = Backlog.
-      #    move-issue-status.sh sources .env.project for field/option IDs.
-      # ------------------------------------------------------------------
       - name: Set Status to Backlog
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
@@ -47,28 +34,13 @@ jobs:
           TARGET_STATUS: Backlog
         run: bash scripts/move-issue-status.sh
 
-      # ------------------------------------------------------------------
-      # 3. Set Assignee Type = Human or Devin based on which label was added.
-      #    There's no helper for non-Status fields, so we call the
-      #    GraphQL API directly after sourcing .env.project for the IDs.
-      # ------------------------------------------------------------------
-      - name: Set Assignee Type
+      - name: Set Assignee Type to Human
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
-          LABEL: ${{ github.event.label.name }}
           ISSUE_NODE_ID: ${{ github.event.issue.node_id }}
         run: |
           source .env.project
 
-          if [[ "$LABEL" == "devin" ]]; then
-            OPT_ID="$OPT_DEVIN"
-            DISPLAY="Devin"
-          else
-            OPT_ID="$OPT_HUMAN"
-            DISPLAY="Human"
-          fi
-
-          # Find the project item ID for this issue.
           ITEM_ID=$(gh api graphql \
             -H "Authorization: Bearer ${GH_PAT}" \
             -f query='
@@ -86,11 +58,9 @@ jobs:
 
           if [[ -z "$ITEM_ID" || "$ITEM_ID" == "null" ]]; then
             echo "ERROR: Issue not found in project ${PROJECT_ID}." >&2
-            echo "  Ensure issue-opened.yml ran when this issue was created." >&2
             exit 1
           fi
 
-          echo "Setting Assignee Type to ${DISPLAY} (option ${OPT_ID})..."
           gh api graphql \
             -H "Authorization: Bearer ${GH_PAT}" \
             -f query='
@@ -99,45 +69,9 @@ jobs:
               projectId: "'"${PROJECT_ID}"'"
               itemId:    "'"${ITEM_ID}"'"
               fieldId:   "'"${ASSIGNEE_TYPE_FIELD_ID}"'"
-              value:     { singleSelectOptionId: "'"${OPT_ID}"'" }
+              value:     { singleSelectOptionId: "'"${OPT_HUMAN}"'" }
             }) {
               projectV2Item { id }
             }
           }' | jq -e '.data.updateProjectV2ItemFieldValue.projectV2Item.id' > /dev/null
-          echo "Assignee Type set to ${DISPLAY}."
-
-      # ------------------------------------------------------------------
-      # 4. (devin only) Call the Devin API to start a session.
-      #    The helper script posts a comment on the issue with the session
-      #    link. We also capture the session ID/URL into step outputs for
-      #    potential downstream use.
-      # ------------------------------------------------------------------
-      - name: Create Devin session
-        if: github.event.label.name == 'devin'
-        id: devin
-        env:
-          GH_PAT: ${{ secrets.GH_PAT }}
-          DEVIN_API_TOKEN: ${{ secrets.DEVIN_API_TOKEN }}
-          DEVIN_ORG_ID: ${{ vars.DEVIN_ORG_ID }}
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
-          ISSUE_TITLE: ${{ github.event.issue.title }}
-          ISSUE_BODY: ${{ github.event.issue.body }}
-          REPO_OWNER: ${{ vars.PROJECT_OWNER }}
-          REPO_NAME: ghostfolio
-        run: |
-          # Tee so output is visible in the Actions log AND saved for parsing.
-          bash scripts/create-devin-session.sh | tee /tmp/devin_out.txt
-          # Write DEVIN_SESSION_* vars to step outputs for downstream steps.
-          grep '^DEVIN_SESSION_' /tmp/devin_out.txt >> "$GITHUB_OUTPUT" || true
-
-      # ------------------------------------------------------------------
-      # 5. (devin only) Move Status from Backlog → Devin PR now that the
-      #    session is confirmed running.
-      # ------------------------------------------------------------------
-      - name: Set Status to Devin PR
-        if: github.event.label.name == 'devin'
-        env:
-          GH_PAT: ${{ secrets.GH_PAT }}
-          ISSUE_NODE_ID: ${{ github.event.issue.node_id }}
-          TARGET_STATUS: Devin PR
-        run: bash scripts/move-issue-status.sh
+          echo "Assignee Type set to Human."

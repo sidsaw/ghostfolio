@@ -1,0 +1,143 @@
+name: Devin PR Execution
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  issues: write
+
+jobs:
+  execute:
+    name: Start Devin PR session
+    runs-on: ubuntu-latest
+    if: github.event.label.name == 'devin:execute'
+    env:
+      GH_TOKEN: ${{ secrets.GH_PAT }}
+
+    steps:
+      - name: Call Devin API — execution prompt
+        id: devin
+        env:
+          DEVIN_API_TOKEN: ${{ secrets.DEVIN_API_TOKEN }}
+          GH_PAT:          ${{ secrets.GH_PAT }}
+          ISSUE_NUMBER:    ${{ github.event.issue.number }}
+          ISSUE_TITLE:     ${{ github.event.issue.title }}
+          # True if Devin already reviewed this issue and posted a plan.
+          HAS_READY: ${{ contains(github.event.issue.labels.*.name, 'devin:ready') }}
+        run: |
+          DEVIN_ORG_ID="${{ vars.DEVIN_ORG_ID }}"
+          if [[ -z "$DEVIN_ORG_ID" ]]; then
+            echo "ERROR: DEVIN_ORG_ID repo variable is not set." >&2
+            exit 1
+          fi
+
+          ISSUE_URL="https://github.com/sidsaw/ghostfolio/issues/${ISSUE_NUMBER}"
+          REPO="sidsaw/ghostfolio"
+
+          # Build the conditional part of the prompt based on whether
+          # Devin already reviewed this issue (devin:ready label present).
+          if [[ "$HAS_READY" == "true" ]]; then
+            PLAN_INSTRUCTION=$(printf '%s\n' \
+              'This issue has already been reviewed. You previously posted a plan in the' \
+              'issue comments — read it and proceed directly with implementation.' \
+              'Do NOT re-post the plan.')
+          else
+            PLAN_INSTRUCTION=$(printf '%s\n' \
+              'This issue has NOT been reviewed yet. Before writing any code:' \
+              '  1. Post a comment on the issue with your implementation plan (files to change,' \
+              '     approach, risks). Use the GitHub API:' \
+              "     POST https://api.github.com/repos/${REPO}/issues/${ISSUE_NUMBER}/comments" \
+              '     Body: { "body": "your plan here" }' \
+              '  2. Then proceed with the implementation.')
+          fi
+
+          PROMPT=$(printf '%s\n' \
+            'You are an autonomous software engineer. Your job is to implement a fix for a' \
+            'GitHub issue and open a pull request.' \
+            '' \
+            "Issue URL  : ${ISSUE_URL}" \
+            "Issue title: ${ISSUE_TITLE}" \
+            "Repo       : https://github.com/${REPO}" \
+            "GitHub API token (for reading issue/comments): ${GH_PAT}" \
+            '' \
+            '=== STEP 1: Read full context ===' \
+            '' \
+            'Fetch the issue body and ALL comments:' \
+            "  GET https://api.github.com/repos/${REPO}/issues/${ISSUE_NUMBER}" \
+            "  GET https://api.github.com/repos/${REPO}/issues/${ISSUE_NUMBER}/comments" \
+            'Use Authorization: Bearer <token> with the GitHub API token above.' \
+            '' \
+            'Also clone and explore the codebase:' \
+            "  git clone https://github.com/${REPO}.git" \
+            '' \
+            '=== STEP 2: Plan ===' \
+            '' \
+            "${PLAN_INSTRUCTION}" \
+            '' \
+            '=== STEP 3: Implement ===' \
+            '' \
+            '- Create a new branch from the default branch.' \
+            '- Implement the fix described in the issue.' \
+            '- Keep changes focused — no unrelated modifications.' \
+            '- Write or update tests if applicable.' \
+            '' \
+            '=== STEP 4: Open a PR ===' \
+            '' \
+            '- Open a pull request against the default branch.' \
+            "- The PR body MUST include the line: closes #${ISSUE_NUMBER}" \
+            '  (This links the PR to the issue and auto-closes it on merge.)' \
+            '- PR title should be concise and descriptive.')
+
+          echo "Creating Devin execution session for issue #${ISSUE_NUMBER} (devin:ready=${HAS_READY})..."
+          DEVIN_RESP=$(curl --silent --fail-with-body \
+            -X POST "https://api.devin.ai/v3/organizations/${DEVIN_ORG_ID}/sessions" \
+            -H "Authorization: Bearer ${DEVIN_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg p "$PROMPT" '{"prompt": $p}')")
+
+          SESSION_ID=$(echo "$DEVIN_RESP" | jq -r '.session_id // empty')
+          SESSION_URL=$(echo "$DEVIN_RESP" | jq -r '.url // empty')
+
+          if [[ -z "$SESSION_ID" ]]; then
+            echo "ERROR: Devin API returned no session_id. Response:" >&2
+            echo "$DEVIN_RESP" | jq . >&2
+            exit 1
+          fi
+
+          echo "Session ID : ${SESSION_ID}"
+          echo "Session URL: ${SESSION_URL}"
+          echo "session_id=${SESSION_ID}"   >> "$GITHUB_OUTPUT"
+          echo "session_url=${SESSION_URL}" >> "$GITHUB_OUTPUT"
+
+      - name: Post session comment on issue
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          SESSION_ID="${{ steps.devin.outputs.session_id }}"
+          SESSION_URL="${{ steps.devin.outputs.session_url }}"
+          HAS_READY="${{ contains(github.event.issue.labels.*.name, 'devin:ready') }}"
+
+          if [[ "$HAS_READY" == "true" ]]; then
+            PLAN_NOTE='A plan was already posted during Devin'"'"'s earlier review — Devin will proceed directly with implementation.'
+          else
+            PLAN_NOTE='Devin will post its implementation plan as a comment before writing any code.'
+          fi
+
+          BODY=$(printf '%s\n' \
+            '🤖 **Devin is implementing this issue.**' \
+            '' \
+            "${PLAN_NOTE}" \
+            '' \
+            '| | |' \
+            '|---|---|' \
+            "| **Session ID** | \`${SESSION_ID}\` |" \
+            "| **Session URL** | ${SESSION_URL} |" \
+            '' \
+            'Devin will open a PR with `closes #${{ github.event.issue.number }}` in the body when done.' \
+            'The issue will move to **In Review** automatically when the PR is opened.')
+
+          gh api \
+            -X POST \
+            "/repos/sidsaw/ghostfolio/issues/${{ github.event.issue.number }}/comments" \
+            -f body="$BODY"

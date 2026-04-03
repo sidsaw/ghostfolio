@@ -325,7 +325,83 @@ OPT_DEVIN=${OPT_DEVIN}
 EOF
 
 # ---------------------------------------------------------------------------
-# 10. Print summary
+# 10. Configure "Item added to project" built-in automation → Status = Inbox
+#
+#     GitHub Projects v2 has built-in workflows (automations) accessible via
+#     GraphQL.  The "Item added to project" workflow can be enabled so new
+#     items get a default Status; we also explicitly set Status = Inbox in
+#     the issue-opened.yml workflow, so this is belt-and-suspenders for items
+#     added through the UI or other paths.
+# ---------------------------------------------------------------------------
+echo "==> Configuring 'Item added to project' automation (Status → Inbox)..."
+
+WORKFLOWS_RESP=$(gql -f query='
+{
+  node(id: "'"${PROJECT_ID}"'") {
+    ... on ProjectV2 {
+      workflows(first: 20) {
+        nodes { id name enabled number }
+      }
+    }
+  }
+}' 2>/dev/null || echo '{}')
+
+ITEM_ADDED_ID=$(echo "$WORKFLOWS_RESP" | jq -r \
+  '(.data.node.workflows.nodes // [])[] | select(.name == "Item added to project") | .id' \
+  2>/dev/null || true)
+
+if [[ -n "$ITEM_ADDED_ID" && "$ITEM_ADDED_ID" != "null" ]]; then
+  echo "    Found workflow ${ITEM_ADDED_ID} — enabling..."
+  ENABLE_RESP=$(gql -f query='
+mutation {
+  updateProjectV2Workflow(input: {
+    workflowId: "'"${ITEM_ADDED_ID}"'"
+    enabled: true
+  }) {
+    workflow { id enabled }
+  }
+}' 2>/dev/null || echo '{}')
+
+  ENABLED=$(echo "$ENABLE_RESP" | jq -r '.data.updateProjectV2Workflow.workflow.enabled' 2>/dev/null || echo "unknown")
+  echo "    Workflow enabled: ${ENABLED}"
+  echo "    NOTE: To also set Status=Inbox via this automation, open the project in the GitHub UI"
+  echo "    and configure the 'Item added to project' workflow to set Status = Inbox."
+else
+  echo "    No 'Item added to project' workflow found via API (may require UI configuration)."
+  echo "    The issue-opened.yml workflow explicitly sets Status=Inbox for all issues."
+fi
+
+# ---------------------------------------------------------------------------
+# 11. Ensure required labels exist on the repo
+#
+#     Uses `gh label create --force` which is idempotent: creates the label
+#     if absent, updates color/description if it already exists.
+# ---------------------------------------------------------------------------
+echo "==> Ensuring Devin workflow labels on ${REPO_OWNER}/${REPO_NAME}..."
+
+declare -A LABELS
+LABELS["triage"]="E4E669:Needs triage — auto-applied on issue creation"
+LABELS["human"]="0075CA:Requires a human engineer"
+LABELS["devin:review"]="1D76DB:Trigger: ask Devin to review the issue"
+LABELS["devin:ready"]="0E8A16:Devin assessed: can implement the PR autonomously"
+LABELS["devin:triaged"]="E99695:Devin assessed: needs human input or clarification"
+LABELS["devin:execute"]="5319E7:Trigger: ask Devin to implement the PR"
+
+for label_name in "${!LABELS[@]}"; do
+  IFS=':' read -r color description <<< "${LABELS[$label_name]}"
+  echo "    Label: ${label_name}"
+  gh label create "${label_name}" \
+    --repo "${REPO_OWNER}/${REPO_NAME}" \
+    --color "${color}" \
+    --description "${description}" \
+    --force \
+    2>&1 | sed 's/^/      /' || true
+done
+
+echo "    Labels configured."
+
+# ---------------------------------------------------------------------------
+# 12. Print summary
 # ---------------------------------------------------------------------------
 echo ""
 echo "============================================================"

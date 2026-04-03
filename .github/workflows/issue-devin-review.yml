@@ -1,0 +1,127 @@
+name: Devin Review
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  issues: write
+
+jobs:
+  review:
+    name: Ask Devin to assess the issue
+    runs-on: ubuntu-latest
+    if: github.event.label.name == 'devin:review'
+    env:
+      GH_TOKEN: ${{ secrets.GH_PAT }}
+
+    steps:
+      - name: Call Devin API — review prompt
+        id: devin
+        env:
+          DEVIN_API_TOKEN: ${{ secrets.DEVIN_API_TOKEN }}
+          GH_PAT:          ${{ secrets.GH_PAT }}
+          ISSUE_NUMBER:    ${{ github.event.issue.number }}
+          ISSUE_TITLE:     ${{ github.event.issue.title }}
+        run: |
+          DEVIN_ORG_ID="${{ vars.DEVIN_ORG_ID }}"
+          if [[ -z "$DEVIN_ORG_ID" ]]; then
+            echo "ERROR: DEVIN_ORG_ID repo variable is not set." >&2
+            exit 1
+          fi
+
+          ISSUE_URL="https://github.com/sidsaw/ghostfolio/issues/${ISSUE_NUMBER}"
+          REPO="sidsaw/ghostfolio"
+
+          # Build the prompt using printf so all lines stay at YAML block-scalar indentation.
+          # Single-quoted lines = literal text; double-quoted lines = variable expansion.
+          PROMPT=$(printf '%s\n' \
+            'You are a senior software engineer reviewing a GitHub issue.' \
+            'Your job is ASSESSMENT ONLY — do NOT open a PR or write any code.' \
+            '' \
+            "Issue URL  : ${ISSUE_URL}" \
+            "Issue title: ${ISSUE_TITLE}" \
+            "Repo       : https://github.com/${REPO}" \
+            '' \
+            '=== STEP 1: Read the full issue context ===' \
+            '' \
+            'Use the GitHub REST API (curl) to read the issue body and ALL comments.' \
+            "GitHub API token for authentication: ${GH_PAT}" \
+            '' \
+            "  GET https://api.github.com/repos/${REPO}/issues/${ISSUE_NUMBER}" \
+            "  GET https://api.github.com/repos/${REPO}/issues/${ISSUE_NUMBER}/comments" \
+            '' \
+            'Also explore the codebase at https://github.com/sidsaw/ghostfolio to understand scope.' \
+            '' \
+            '=== STEP 2: Decide — can you autonomously create a complete, correct PR? ===' \
+            '' \
+            'IF YES (you can implement this autonomously):' \
+            '  a. Post a comment on the issue with your plan: which files you will change, your' \
+            '     approach, any risks or assumptions. Keep the plan concrete and actionable.' \
+            "     POST https://api.github.com/repos/${REPO}/issues/${ISSUE_NUMBER}/comments" \
+            '     Body: { "body": "your plan here" }' \
+            '  b. Add the label "devin:ready" to the issue:' \
+            "     POST https://api.github.com/repos/${REPO}/issues/${ISSUE_NUMBER}/labels" \
+            '     Body: { "labels": ["devin:ready"] }' \
+            '' \
+            'IF NO (needs more info, human judgment, secrets access, or too risky):' \
+            '  a. Post a comment explaining exactly what clarity you need from the team, OR' \
+            '     a step-by-step plan for a human engineer to follow.' \
+            "     POST https://api.github.com/repos/${REPO}/issues/${ISSUE_NUMBER}/comments" \
+            '     Body: { "body": "your explanation/plan here" }' \
+            '  b. Add the label "devin:triaged" to the issue:' \
+            "     POST https://api.github.com/repos/${REPO}/issues/${ISSUE_NUMBER}/labels" \
+            '     Body: { "labels": ["devin:triaged"] }' \
+            '' \
+            '=== STEP 3: Remove the trigger label (always) ===' \
+            '' \
+            'Remove the "devin:review" label regardless of your decision:' \
+            "  DELETE https://api.github.com/repos/${REPO}/issues/${ISSUE_NUMBER}/labels/devin%3Areview" \
+            '' \
+            'Use Authorization: Bearer <token> with the GitHub API token provided above.' \
+            'Post exactly one comment summarising your decision and plan/needs. Then stop.')
+
+          echo "Creating Devin review session for issue #${ISSUE_NUMBER}..."
+          DEVIN_RESP=$(curl --silent --fail-with-body \
+            -X POST "https://api.devin.ai/v3/organizations/${DEVIN_ORG_ID}/sessions" \
+            -H "Authorization: Bearer ${DEVIN_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg p "$PROMPT" '{"prompt": $p}')")
+
+          SESSION_ID=$(echo "$DEVIN_RESP" | jq -r '.session_id // empty')
+          SESSION_URL=$(echo "$DEVIN_RESP" | jq -r '.url // empty')
+
+          if [[ -z "$SESSION_ID" ]]; then
+            echo "ERROR: Devin API returned no session_id. Response:" >&2
+            echo "$DEVIN_RESP" | jq . >&2
+            exit 1
+          fi
+
+          echo "Session ID : ${SESSION_ID}"
+          echo "Session URL: ${SESSION_URL}"
+          echo "session_id=${SESSION_ID}"   >> "$GITHUB_OUTPUT"
+          echo "session_url=${SESSION_URL}" >> "$GITHUB_OUTPUT"
+
+      - name: Post "Devin is reviewing" comment
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          SESSION_ID="${{ steps.devin.outputs.session_id }}"
+          SESSION_URL="${{ steps.devin.outputs.session_url }}"
+
+          BODY=$(printf '%s\n' \
+            '🔍 **Devin is reviewing this issue.**' \
+            '' \
+            'Devin will read the issue and all comments, assess whether it can autonomously implement a PR, and post its decision as a follow-up comment.' \
+            '' \
+            "| | |" \
+            "|---|---|" \
+            "| **Session ID** | \`${SESSION_ID}\` |" \
+            "| **Session URL** | ${SESSION_URL} |" \
+            '' \
+            'Devin will add `devin:ready` (it can do the PR) or `devin:triaged` (needs human input) and remove `devin:review` when done.')
+
+          gh api \
+            -X POST \
+            "/repos/sidsaw/ghostfolio/issues/${{ github.event.issue.number }}/comments" \
+            -f body="$BODY"

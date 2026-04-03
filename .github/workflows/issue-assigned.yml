@@ -12,9 +12,7 @@ jobs:
   move-to-in-progress:
     name: Move human-assigned issue to In Progress
     runs-on: ubuntu-latest
-    # Skip immediately if the devin label is present — Devin issues move
-    # through issue-triaged.yml (Backlog → Devin PR), not this path.
-    if: "!contains(github.event.issue.labels.*.name, 'devin')"
+    if: true
     # gh CLI requires GH_TOKEN in Actions context even when -H is passed.
     env:
       GH_TOKEN: ${{ secrets.GH_PAT }}

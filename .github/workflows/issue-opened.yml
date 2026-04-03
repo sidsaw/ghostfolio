@@ -21,32 +21,33 @@ jobs:
         uses: actions/checkout@v4
 
       # ------------------------------------------------------------------
-      # 1. Add issue to the GitHub Project v2
+      # 1. Add issue to the project AND set Status = Inbox in one step.
       #    addProjectV2ItemById is idempotent — safe to re-run.
+      #    We capture the item ID directly from the add mutation to avoid
+      #    a second GraphQL round-trip in move-issue-status.sh.
       # ------------------------------------------------------------------
-      - name: Add issue to project
+      - name: Add to project and set Status to Inbox
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
-          PROJECT_NUMBER: ${{ vars.PROJECT_NUMBER }}
-          PROJECT_OWNER: ${{ vars.PROJECT_OWNER }}
           ISSUE_NODE_ID: ${{ github.event.issue.node_id }}
         run: |
-          # Load field IDs from the committed .env.project file.
           if [[ ! -f .env.project ]]; then
             echo "ERROR: .env.project not found. Run scripts/setup-project.sh and commit the file." >&2
             exit 1
           fi
           source .env.project
 
-          # Verify PROJECT_ID was loaded.
-          if [[ -z "${PROJECT_ID:-}" ]]; then
-            echo "ERROR: PROJECT_ID missing from .env.project" >&2
-            exit 1
-          fi
+          for var in PROJECT_ID STATUS_FIELD_ID OPT_INBOX; do
+            if [[ -z "${!var:-}" ]]; then
+              echo "ERROR: ${var} missing from .env.project" >&2
+              exit 1
+            fi
+          done
 
           echo "Adding issue ${ISSUE_NODE_ID} to project ${PROJECT_ID}..."
-          gh api graphql \
+          ITEM_ID=$(gh api graphql \
             -H "Authorization: Bearer ${GH_PAT}" \
+            -H "X-Github-Next-Global-ID: 1" \
             -f query='
           mutation {
             addProjectV2ItemById(input: {
@@ -55,20 +56,31 @@ jobs:
             }) {
               item { id }
             }
-          }' | jq -e '.data.addProjectV2ItemById.item.id' > /dev/null
+          }' | jq -r '.data.addProjectV2ItemById.item.id')
 
-          echo "Issue added to project."
+          if [[ -z "$ITEM_ID" || "$ITEM_ID" == "null" ]]; then
+            echo "ERROR: addProjectV2ItemById returned no item ID" >&2
+            exit 1
+          fi
+          echo "Project item ID: ${ITEM_ID}"
 
-      # ------------------------------------------------------------------
-      # 2. Set Status = Inbox via the shared helper script.
-      #    The helper sources .env.project automatically.
-      # ------------------------------------------------------------------
-      - name: Set Status to Inbox
-        env:
-          GH_PAT: ${{ secrets.GH_PAT }}
-          ISSUE_NODE_ID: ${{ github.event.issue.node_id }}
-          TARGET_STATUS: Inbox
-        run: bash scripts/move-issue-status.sh
+          echo "Setting Status to Inbox (${OPT_INBOX})..."
+          gh api graphql \
+            -H "Authorization: Bearer ${GH_PAT}" \
+            -H "X-Github-Next-Global-ID: 1" \
+            -f query='
+          mutation {
+            updateProjectV2ItemFieldValue(input: {
+              projectId: "'"${PROJECT_ID}"'"
+              itemId:    "'"${ITEM_ID}"'"
+              fieldId:   "'"${STATUS_FIELD_ID}"'"
+              value:     { singleSelectOptionId: "'"${OPT_INBOX}"'" }
+            }) {
+              projectV2Item { id }
+            }
+          }' | jq -e '.data.updateProjectV2ItemFieldValue.projectV2Item.id' > /dev/null
+
+          echo "Status set to Inbox."
 
       # ------------------------------------------------------------------
       # 3. Apply the triage label so the team knows this needs review.
