@@ -1,3 +1,84 @@
+# Devin Issue Triage
+
+> This is a demo fork of [Ghostfolio](https://ghostfol.io) used to showcase automated issue triage with GitHub Projects v2 and [Devin AI](https://devin.ai).
+
+Issues filed here move through a kanban pipeline automatically. Adding the `devin` label hands the issue to Devin, which opens a PR and closes the issue when done. Adding the `human` label routes it to a human engineer.
+
+## Board Columns
+
+| Status | Description |
+|---|---|
+| **Inbox** | New issues land here automatically with the `triage` label applied. |
+| **Backlog** | Triaged and prioritized. Assigned to a human or queued for Devin. |
+| **Devin PR** | A Devin session is running or a PR has been opened by Devin. |
+| **In Progress** | A human engineer is actively working on this. |
+| **In Review** | A PR exists and is awaiting code review. Both tracks converge here. |
+| **Done** | Merged and closed. |
+
+## Setup
+
+### 1. Create the project board
+
+```bash
+GH_PAT=<your-token> ./scripts/setup-project.sh
+```
+
+This creates the GitHub Project v2 under `sidsaw` with all fields and columns, and writes `.env.project` with the generated IDs.
+
+### 2. Configure repo secrets and variables
+
+| Name | Type | Description |
+|---|---|---|
+| `GH_PAT` | Secret | Classic PAT with `repo` + `project` scopes. Used for all project board mutations. |
+| `DEVIN_API_TOKEN` | Secret | Devin service user token. |
+| `DEVIN_ORG_ID` | Variable | Devin organization ID. |
+| `PROJECT_NUMBER` | Variable | Set to the number printed by `setup-project.sh`. |
+| `PROJECT_OWNER` | Variable | GitHub username that owns the project (`sidsaw`). |
+
+```bash
+gh secret set GH_PAT           --repo sidsaw/ghostfolio --body "<token>"
+gh secret set DEVIN_API_TOKEN  --repo sidsaw/ghostfolio --body "<token>"
+gh variable set DEVIN_ORG_ID   --repo sidsaw/ghostfolio --body "<org-id>"
+gh variable set PROJECT_NUMBER --repo sidsaw/ghostfolio --body "<number>"
+gh variable set PROJECT_OWNER  --repo sidsaw/ghostfolio --body "sidsaw"
+```
+
+### 3. Create labels
+
+```bash
+gh label create devin            --repo sidsaw/ghostfolio --color 7B61FF
+gh label create human            --repo sidsaw/ghostfolio --color 0075CA
+gh label create triage           --repo sidsaw/ghostfolio --color E4E669
+gh label create priority:critical --repo sidsaw/ghostfolio --color B60205
+gh label create priority:high    --repo sidsaw/ghostfolio --color D93F0B
+gh label create priority:medium  --repo sidsaw/ghostfolio --color FBCA04
+gh label create priority:low     --repo sidsaw/ghostfolio --color 0E8A16
+```
+
+### 4. Push the workflows
+
+The `.github/workflows/` directory is already committed. Push to `main` to activate them.
+
+## Workflows
+
+| File | Trigger | What it does |
+|---|---|---|
+| `issue-opened.yml` | Issue opened | Adds to project, sets Status=Inbox, applies `triage` label |
+| `issue-triaged.yml` | `devin` or `human` label added | Removes `triage`, sets Backlog + Assignee Type. For `devin`: calls Devin API, moves to Devin PR |
+| `pr-opened.yml` | PR opened | Finds linked issue via `closes #N`; moves Devin PR→In Review or In Progress→In Review |
+| `pr-merged.yml` | PR merged | Moves linked issue to Done and closes it |
+| `issue-assigned.yml` | Issue assigned | Moves Backlog→In Progress for human-assigned issues (skips if `devin` label present) |
+
+## Helper Scripts
+
+- **`scripts/setup-project.sh`** — idempotent project + field setup; writes `.env.project`
+- **`scripts/move-issue-status.sh`** — moves an issue to a named Status column via GraphQL
+- **`scripts/create-devin-session.sh`** — calls the Devin v3 API and posts the session link as an issue comment
+
+See `.env.project.example` for the format of the generated ID file.
+
+---
+
 <div align="center">
 
 [<img src="https://avatars.githubusercontent.com/u/82473144?s=200" width="100" alt="Ghostfolio logo">](https://ghostfol.io)
