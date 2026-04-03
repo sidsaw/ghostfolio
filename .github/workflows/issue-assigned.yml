@@ -1,0 +1,86 @@
+name: Issue Assigned
+
+on:
+  issues:
+    types: [assigned]
+
+# Minimal GITHUB_TOKEN permissions — all project mutations use GH_PAT.
+permissions:
+  issues: read
+
+jobs:
+  move-to-in-progress:
+    name: Move human-assigned issue to In Progress
+    runs-on: ubuntu-latest
+    # Skip immediately if the devin label is present — Devin issues move
+    # through issue-triaged.yml (Backlog → Devin PR), not this path.
+    if: "!contains(github.event.issue.labels.*.name, 'devin')"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Move to In Progress if currently in Backlog
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          ISSUE_NODE_ID: ${{ github.event.issue.node_id }}
+          REPO_OWNER: ${{ vars.PROJECT_OWNER }}
+          REPO_NAME: ghostfolio
+        run: |
+          source .env.project
+
+          # ----------------------------------------------------------------
+          # 1. Look up the issue's current Status on the project board.
+          #    We query by issue node ID so we don't need the issue number.
+          # ----------------------------------------------------------------
+          CURRENT_STATUS=$(gh api graphql \
+            -H "Authorization: Bearer ${GH_PAT}" \
+            -f query='
+          {
+            node(id: "'"${ISSUE_NODE_ID}"'") {
+              ... on Issue {
+                projectItems(first: 20) {
+                  nodes {
+                    project { id }
+                    fieldValues(first: 20) {
+                      nodes {
+                        ... on ProjectV2ItemFieldSingleSelectValue {
+                          name
+                          field { ... on ProjectV2SingleSelectField { name } }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }' | jq -r \
+            --arg pid "$PROJECT_ID" \
+            '.data.node.projectItems.nodes[]
+             | select(.project.id == $pid)
+             | .fieldValues.nodes[]
+             | select(.field != null and .field.name == "Status")
+             | .name // empty')
+
+          if [[ -z "$CURRENT_STATUS" ]]; then
+            echo "Issue is not tracked in project ${PROJECT_ID} — skipping."
+            exit 0
+          fi
+          echo "Current status: \"${CURRENT_STATUS}\""
+
+          # ----------------------------------------------------------------
+          # 2. Only move from Backlog — if the issue is already In Progress,
+          #    In Review, or Done, leave it alone.
+          # ----------------------------------------------------------------
+          if [[ "$CURRENT_STATUS" != "Backlog" ]]; then
+            echo "Issue is in \"${CURRENT_STATUS}\", not Backlog — no move needed."
+            exit 0
+          fi
+
+          # ----------------------------------------------------------------
+          # 3. Move to In Progress.
+          #    ISSUE_NODE_ID is already set in the step env so the helper
+          #    picks it up without an explicit inline assignment.
+          # ----------------------------------------------------------------
+          echo "Moving to In Progress..."
+          TARGET_STATUS="In Progress" bash scripts/move-issue-status.sh
