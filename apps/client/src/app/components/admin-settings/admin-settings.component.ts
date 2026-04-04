@@ -6,6 +6,7 @@ import { PROPERTY_API_KEY_GHOSTFOLIO } from '@ghostfolio/common/config';
 import { ConfirmationDialogType } from '@ghostfolio/common/enums';
 import { getDateFormatString } from '@ghostfolio/common/helper';
 import {
+  AdminData,
   DataProviderGhostfolioStatusResponse,
   DataProviderInfo,
   User
@@ -68,7 +69,9 @@ import { catchError, filter, of } from 'rxjs';
 export class GfAdminSettingsComponent implements OnInit {
   @ViewChild(MatSort) sort: MatSort;
 
-  public dataSource = new MatTableDataSource<DataProviderInfo>();
+  public dataSource = new MatTableDataSource<
+    AdminData['dataProviders'][number]
+  >();
   public defaultDateFormat: string;
   public displayedColumns = [
     'name',
