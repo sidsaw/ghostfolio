@@ -727,6 +727,11 @@ export class ActivitiesService {
             userCurrency,
             order.date
           )
+        ]).then(([fee1, fee2, unitPrice, val]) => [
+          fee1 ?? 0,
+          fee2 ?? 0,
+          unitPrice ?? 0,
+          val ?? 0
         ]);
 
         return {
