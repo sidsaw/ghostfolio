@@ -303,13 +303,6 @@ export class GfCreateOrUpdateActivityDialogComponent {
       });
 
     this.activityForm.get('date').valueChanges.subscribe(() => {
-      if (isToday(this.activityForm.get('date').value)) {
-        this.activityForm.get('updateAccountBalance').enable();
-      } else {
-        this.activityForm.get('updateAccountBalance').disable();
-        this.activityForm.get('updateAccountBalance').setValue(false);
-      }
-
       this.changeDetectorRef.markForCheck();
     });
 
