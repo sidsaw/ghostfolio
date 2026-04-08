@@ -1,0 +1,157 @@
+name: Devin PR Test & Review
+
+on:
+  pull_request:
+    types: [labeled]
+
+permissions:
+  pull-requests: write
+  issues: write
+
+jobs:
+  test:
+    name: Ask Devin to review and test the PR
+    runs-on: ubuntu-latest
+    if: github.event.label.name == 'devin:test'
+    env:
+      GH_TOKEN: ${{ secrets.GH_PAT }}
+
+    steps:
+      - name: Call Devin API — PR test prompt
+        id: devin
+        env:
+          DEVIN_API_TOKEN: ${{ secrets.DEVIN_API_TOKEN }}
+          GH_PAT:          ${{ secrets.GH_PAT }}
+          PR_NUMBER:       ${{ github.event.pull_request.number }}
+          PR_TITLE:        ${{ github.event.pull_request.title }}
+          PR_AUTHOR:       ${{ github.event.pull_request.user.login }}
+          PR_HEAD_BRANCH:  ${{ github.event.pull_request.head.ref }}
+          PR_BASE_BRANCH:  ${{ github.event.pull_request.base.ref }}
+        run: |
+          DEVIN_ORG_ID="${{ vars.DEVIN_ORG_ID }}"
+          if [[ -z "$DEVIN_ORG_ID" ]]; then
+            echo "ERROR: DEVIN_ORG_ID repo variable is not set." >&2
+            exit 1
+          fi
+
+          REPO="sidsaw/ghostfolio"
+          PR_URL="https://github.com/${REPO}/pull/${PR_NUMBER}"
+
+          PROMPT=$(printf '%s\n' \
+            'You are a senior software engineer performing a thorough code review and test' \
+            'verification of an open GitHub pull request. Your job is to review the PR,' \
+            'assess test coverage, and report your findings. Do NOT merge the PR.' \
+            '' \
+            "PR URL    : ${PR_URL}" \
+            "PR title  : ${PR_TITLE}" \
+            "PR author : ${PR_AUTHOR}" \
+            "Branch    : ${PR_HEAD_BRANCH} → ${PR_BASE_BRANCH}" \
+            "Repo      : https://github.com/${REPO}" \
+            '' \
+            '=== STEP 1: Read the PR in full ===' \
+            '' \
+            'Use the GitHub REST API (curl) with Authorization: Bearer <token> where' \
+            "<token> is: ${GH_PAT}" \
+            '' \
+            "  PR metadata : GET https://api.github.com/repos/${REPO}/pulls/${PR_NUMBER}" \
+            "  PR diff     : GET https://api.github.com/repos/${REPO}/pulls/${PR_NUMBER}/files" \
+            "  PR comments : GET https://api.github.com/repos/${REPO}/pulls/${PR_NUMBER}/comments" \
+            "  PR reviews  : GET https://api.github.com/repos/${REPO}/pulls/${PR_NUMBER}/reviews" \
+            '' \
+            'Also check if this PR closes any issue (look for "closes #N" / "fixes #N" in the' \
+            'PR body). If it does, read that issue too:' \
+            "  GET https://api.github.com/repos/${REPO}/issues/<N>" \
+            "  GET https://api.github.com/repos/${REPO}/issues/<N>/comments" \
+            '' \
+            '=== STEP 2: Clone and explore the codebase ===' \
+            '' \
+            "  git clone https://github.com/${REPO}.git" \
+            "  git fetch origin ${PR_HEAD_BRANCH}" \
+            "  git checkout ${PR_HEAD_BRANCH}" \
+            '' \
+            'Explore the changed files and their surrounding context.' \
+            'Look at the existing test suite to understand what is already covered.' \
+            '' \
+            '=== STEP 3: Run tests ===' \
+            '' \
+            'Install dependencies and run the test suite (if it passes in a reasonable time).' \
+            'Note any test failures, flakiness, or setup issues.' \
+            '' \
+            '=== STEP 4: Code review ===' \
+            '' \
+            'Assess the PR across these dimensions:' \
+            '  - Correctness: does the code do what the issue/PR description says?' \
+            '  - Test coverage: are new/changed code paths tested? Are existing tests updated?' \
+            '  - Code quality: readability, naming, duplication, complexity' \
+            '  - Edge cases and error handling' \
+            '  - Security: any obvious vulnerabilities introduced?' \
+            '  - Breaking changes: does this change any public APIs or interfaces?' \
+            '' \
+            '=== STEP 5: Post your review as a PR comment ===' \
+            '' \
+            'Post a single, well-structured review comment on the PR:' \
+            "  POST https://api.github.com/repos/${REPO}/issues/${PR_NUMBER}/comments" \
+            '  Body: { "body": "your review here" }' \
+            '' \
+            'Structure the comment as:' \
+            '  ## Devin Code Review' \
+            '  **Summary:** 1–2 sentence overall verdict (approve / request changes / needs discussion)' \
+            '  **Test results:** pass/fail/skipped counts, any failures' \
+            '  **Findings:** bulleted list of issues found (label each: Bug / Missing test /' \
+            '    Style / Security / Question)' \
+            '  **Suggestions:** specific, actionable recommendations' \
+            '  **Verdict:** LGTM | Needs changes | Needs discussion' \
+            '' \
+            '=== STEP 6: Remove the trigger label ===' \
+            '' \
+            'Always remove the "devin:test" label when done:' \
+            "  DELETE https://api.github.com/repos/${REPO}/issues/${PR_NUMBER}/labels/devin%3Atest" \
+            '' \
+            'Use Authorization: Bearer <token> for all GitHub API calls. Post exactly one' \
+            'review comment, then stop. Do NOT approve or merge the PR.')
+
+          echo "Creating Devin test session for PR #${PR_NUMBER}..."
+          DEVIN_RESP=$(curl --silent --fail-with-body \
+            -X POST "https://api.devin.ai/v3/organizations/${DEVIN_ORG_ID}/sessions" \
+            -H "Authorization: Bearer ${DEVIN_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg p "$PROMPT" '{"prompt": $p}')")
+
+          SESSION_ID=$(echo "$DEVIN_RESP" | jq -r '.session_id // empty')
+          SESSION_URL=$(echo "$DEVIN_RESP" | jq -r '.url // empty')
+
+          if [[ -z "$SESSION_ID" ]]; then
+            echo "ERROR: Devin API returned no session_id. Response:" >&2
+            echo "$DEVIN_RESP" | jq . >&2
+            exit 1
+          fi
+
+          echo "Session ID : ${SESSION_ID}"
+          echo "Session URL: ${SESSION_URL}"
+          echo "session_id=${SESSION_ID}"   >> "$GITHUB_OUTPUT"
+          echo "session_url=${SESSION_URL}" >> "$GITHUB_OUTPUT"
+
+      - name: Post "Devin is reviewing" comment on PR
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          SESSION_ID="${{ steps.devin.outputs.session_id }}"
+          SESSION_URL="${{ steps.devin.outputs.session_url }}"
+
+          BODY=$(printf '%s\n' \
+            '🧪 **Devin is reviewing and testing this PR.**' \
+            '' \
+            'Devin will clone the branch, run the test suite, review the diff, and post a' \
+            'structured code review comment when done.' \
+            '' \
+            '| | |' \
+            '|---|---|' \
+            "| **Session ID** | \`${SESSION_ID}\` |" \
+            "| **Session URL** | ${SESSION_URL} |" \
+            '' \
+            'Devin will remove the `devin:test` label when the review is complete.')
+
+          gh api \
+            -X POST \
+            "/repos/sidsaw/ghostfolio/issues/${{ github.event.pull_request.number }}/comments" \
+            -f body="$BODY"

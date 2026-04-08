@@ -386,6 +386,7 @@ LABELS["devin:review"]="1D76DB:Trigger: ask Devin to review the issue"
 LABELS["devin:ready"]="0E8A16:Devin assessed: can implement the PR autonomously"
 LABELS["devin:triaged"]="E99695:Devin assessed: needs human input or clarification"
 LABELS["devin:execute"]="5319E7:Trigger: ask Devin to implement the PR"
+LABELS["devin:test"]="F9D0C4:Trigger: ask Devin to review and test this PR"
 
 for label_name in "${!LABELS[@]}"; do
   IFS=':' read -r color description <<< "${LABELS[$label_name]}"
