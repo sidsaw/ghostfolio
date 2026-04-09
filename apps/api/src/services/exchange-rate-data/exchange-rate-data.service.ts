@@ -466,6 +466,9 @@ export class ExchangeRateDataService {
         }
       } catch {}
 
+      // Carry forward the last valid exchange rate to fill short gaps
+      // (weekends, holidays). For extended gaps the rate may be stale but
+      // is preferable to crashing with NaN/undefined.
       let lastValidFactor: number | undefined;
 
       for (const date of dates) {

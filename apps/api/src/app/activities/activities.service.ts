@@ -26,7 +26,7 @@ import {
 } from '@ghostfolio/common/interfaces';
 import { OrderWithAccount } from '@ghostfolio/common/types';
 
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
   AssetClass,
@@ -729,7 +729,18 @@ export class ActivitiesService {
               order.date
             )
           ])
-        ).map((result) => result ?? 0);
+        ).map((result) => {
+          if (result === undefined) {
+            Logger.warn(
+              `Missing exchange rate for activity ${order.SymbolProfile.symbol} at ${order.date}. Defaulting to 0.`,
+              'ActivitiesService'
+            );
+
+            return 0;
+          }
+
+          return result;
+        });
 
         return {
           ...order,
