@@ -132,6 +132,9 @@ export class GfAccountsPageComponent implements OnInit {
       .pipe(
         catchError(() => {
           this.accounts = [];
+          this.activitiesCount = 0;
+          this.totalBalanceInBaseCurrency = 0;
+          this.totalValueInBaseCurrency = 0;
           this.changeDetectorRef.markForCheck();
 
           this.notificationService.alert({
