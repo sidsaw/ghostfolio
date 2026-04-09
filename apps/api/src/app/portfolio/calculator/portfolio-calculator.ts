@@ -380,7 +380,7 @@ export abstract class PortfolioCalculator {
         dataSource: item.dataSource,
         end: this.endDate,
         exchangeRates:
-          exchangeRatesByCurrency[`${item.currency}${this.currency}`],
+          exchangeRatesByCurrency[`${item.currency}${this.currency}`] ?? {},
         start: this.startDate,
         symbol: item.symbol
       });

@@ -331,9 +331,14 @@ export class ExchangeRateDataService {
         } catch {}
 
         // Calculate the opposite direction
-        factor =
-          (1 / marketPriceBaseCurrencyFromCurrency) *
-          marketPriceBaseCurrencyToCurrency;
+        if (
+          marketPriceBaseCurrencyFromCurrency &&
+          marketPriceBaseCurrencyToCurrency
+        ) {
+          factor =
+            (1 / marketPriceBaseCurrencyFromCurrency) *
+            marketPriceBaseCurrencyToCurrency;
+        }
       }
     }
 
@@ -461,17 +466,29 @@ export class ExchangeRateDataService {
         }
       } catch {}
 
+      let lastValidFactor: number | undefined;
+
       for (const date of dates) {
         try {
-          const factor =
-            (1 /
-              marketPriceBaseCurrencyFromCurrency[format(date, DATE_FORMAT)]) *
-            marketPriceBaseCurrencyToCurrency[format(date, DATE_FORMAT)];
+          const dateString = format(date, DATE_FORMAT);
+          const fromRate = marketPriceBaseCurrencyFromCurrency[dateString];
+          const toRate = marketPriceBaseCurrencyToCurrency[dateString];
 
-          if (isNaN(factor)) {
-            throw new Error('Exchange rate is not a number');
+          if (fromRate && toRate) {
+            const factor = (1 / fromRate) * toRate;
+
+            if (!isNaN(factor)) {
+              factors[dateString] = factor;
+              lastValidFactor = factor;
+              continue;
+            }
+          }
+
+          // Fall back to last known valid exchange rate
+          if (lastValidFactor !== undefined) {
+            factors[dateString] = lastValidFactor;
           } else {
-            factors[format(date, DATE_FORMAT)] = factor;
+            throw new Error('Exchange rate is not a number');
           }
         } catch {
           let errorMessage = `No exchange rate has been found for ${currencyFrom}${currencyTo} at ${format(
