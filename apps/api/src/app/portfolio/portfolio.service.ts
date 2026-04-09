@@ -172,13 +172,13 @@ export class PortfolioService {
         withExcludedAccounts,
         impersonationId: userId,
         userId: this.request.user.id
-      }).catch((error) => {
+      }).catch((error): Pick<PortfolioDetails, 'accounts'> => {
         Logger.warn(
           `Failed to get portfolio details for user ${userId}: ${error?.message}`,
           'PortfolioService'
         );
 
-        return { accounts: {} } as PortfolioDetails;
+        return { accounts: {} };
       })
     ]);
 
