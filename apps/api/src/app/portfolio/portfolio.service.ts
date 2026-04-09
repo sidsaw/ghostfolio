@@ -64,7 +64,7 @@ import {
 } from '@ghostfolio/common/types';
 import { PerformanceCalculationType } from '@ghostfolio/common/types/performance-calculation-type.type';
 
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { REQUEST } from '@nestjs/core';
 import {
   Account,
@@ -172,6 +172,13 @@ export class PortfolioService {
         withExcludedAccounts,
         impersonationId: userId,
         userId: this.request.user.id
+      }).catch((error) => {
+        Logger.warn(
+          `Failed to get portfolio details for user ${userId}: ${error?.message}`,
+          'PortfolioService'
+        );
+
+        return { accounts: {} } as PortfolioDetails;
       })
     ]);
 

@@ -129,7 +129,19 @@ export class GfAccountsPageComponent implements OnInit {
   public fetchAccounts() {
     this.dataService
       .fetchAccounts()
-      .pipe(takeUntilDestroyed(this.destroyRef))
+      .pipe(
+        catchError(() => {
+          this.accounts = [];
+          this.changeDetectorRef.markForCheck();
+
+          this.notificationService.alert({
+            title: $localize`Oops, failed to fetch accounts.`
+          });
+
+          return EMPTY;
+        }),
+        takeUntilDestroyed(this.destroyRef)
+      )
       .subscribe(
         ({
           accounts,
