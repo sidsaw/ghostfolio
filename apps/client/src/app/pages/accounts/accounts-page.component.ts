@@ -129,7 +129,16 @@ export class GfAccountsPageComponent implements OnInit {
   public fetchAccounts() {
     this.dataService
       .fetchAccounts()
-      .pipe(takeUntilDestroyed(this.destroyRef))
+      .pipe(
+        catchError(() => {
+          this.notificationService.alert({
+            title: $localize`Oops, fetching accounts has failed.`
+          });
+
+          return EMPTY;
+        }),
+        takeUntilDestroyed(this.destroyRef)
+      )
       .subscribe(
         ({
           accounts,
@@ -291,7 +300,16 @@ export class GfAccountsPageComponent implements OnInit {
 
           this.dataService
             .postAccount(account)
-            .pipe(takeUntilDestroyed(this.destroyRef))
+            .pipe(
+              catchError(() => {
+                this.notificationService.alert({
+                  title: $localize`Oops, creating the account has failed.`
+                });
+
+                return EMPTY;
+              }),
+              takeUntilDestroyed(this.destroyRef)
+            )
             .subscribe(() => {
               this.userService
                 .get(true)
