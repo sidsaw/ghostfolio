@@ -223,12 +223,11 @@ export class YahooFinanceDataEnhancerService implements DataEnhancerInterface {
                 depth + 1
               );
 
-              const subHoldings = subProfile?.holdings as unknown as {
-                name: string;
-                weight: number;
-              }[];
+              const subHoldings = this.parseHoldings(
+                subProfile?.holdings as Prisma.JsonValue
+              );
 
-              if (subHoldings?.length > 0) {
+              if (subHoldings.length > 0) {
                 for (const subHolding of subHoldings) {
                   expandedHoldings.push({
                     name: subHolding.name,
@@ -241,12 +240,11 @@ export class YahooFinanceDataEnhancerService implements DataEnhancerInterface {
                   assetProfile.topHoldings?.sectorWeightings ?? [];
 
                 if (wrapperSectors.length === 0) {
-                  const subSectors = subProfile?.sectors as unknown as {
-                    name: string;
-                    weight: number;
-                  }[];
+                  const subSectors = this.parseHoldings(
+                    subProfile?.sectors as Prisma.JsonValue
+                  );
 
-                  if (subSectors?.length > 0) {
+                  if (subSectors.length > 0) {
                     assetProfile.topHoldings = {
                       ...assetProfile.topHoldings,
                       sectorWeightings:
@@ -263,24 +261,14 @@ export class YahooFinanceDataEnhancerService implements DataEnhancerInterface {
                 'YahooFinanceDataEnhancerService'
               );
             }
-
-            // Fallback: include the ETF holding as-is rather than dropping it
-            expandedHoldings.push({
-              name: this.formatName({ longName: holding.holdingName }),
-              weight: holding.holdingPercent
-            });
-          } else if (!holding.holdingName?.includes('ETF')) {
-            expandedHoldings.push({
-              name: this.formatName({ longName: holding.holdingName }),
-              weight: holding.holdingPercent
-            });
-          } else {
-            // depth >= 1 and holding is an ETF: include as-is to avoid infinite recursion
-            expandedHoldings.push({
-              name: this.formatName({ longName: holding.holdingName }),
-              weight: holding.holdingPercent
-            });
           }
+
+          // Include non-ETF holdings directly, and ETF holdings as-is when
+          // expansion was skipped (depth >= 1) or failed
+          expandedHoldings.push({
+            name: this.formatName({ longName: holding.holdingName }),
+            weight: holding.holdingPercent
+          });
         }
 
         response.holdings = expandedHoldings;
@@ -393,6 +381,27 @@ export class YahooFinanceDataEnhancerService implements DataEnhancerInterface {
     }
 
     return { assetClass, assetSubClass };
+  }
+
+  private parseHoldings(
+    aJsonValue: Prisma.JsonValue
+  ): { name: string; weight: number }[] {
+    if (!Array.isArray(aJsonValue)) {
+      return [];
+    }
+
+    return aJsonValue.filter(
+      (item): item is { name: string; weight: number } => {
+        return (
+          item !== null &&
+          typeof item === 'object' &&
+          'name' in item &&
+          typeof (item as Record<string, unknown>).name === 'string' &&
+          'weight' in item &&
+          typeof (item as Record<string, unknown>).weight === 'number'
+        );
+      }
+    );
   }
 
   private parseSector(aString: string) {
