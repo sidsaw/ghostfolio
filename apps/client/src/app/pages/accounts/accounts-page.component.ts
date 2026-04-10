@@ -27,7 +27,7 @@ import { Account as AccountModel } from '@prisma/client';
 import { addIcons } from 'ionicons';
 import { addOutline } from 'ionicons/icons';
 import { DeviceDetectorService } from 'ngx-device-detector';
-import { EMPTY, Subscription } from 'rxjs';
+import { EMPTY, of, Subscription } from 'rxjs';
 import { catchError } from 'rxjs/operators';
 
 import { GfCreateOrUpdateAccountDialogComponent } from './create-or-update-account-dialog/create-or-update-account-dialog.component';
@@ -129,7 +129,21 @@ export class GfAccountsPageComponent implements OnInit {
   public fetchAccounts() {
     this.dataService
       .fetchAccounts()
-      .pipe(takeUntilDestroyed(this.destroyRef))
+      .pipe(
+        catchError(() => {
+          this.notificationService.alert({
+            title: $localize`Oops, fetching accounts has failed.`
+          });
+
+          return of({
+            accounts: [],
+            activitiesCount: 0,
+            totalBalanceInBaseCurrency: 0,
+            totalValueInBaseCurrency: 0
+          });
+        }),
+        takeUntilDestroyed(this.destroyRef)
+      )
       .subscribe(
         ({
           accounts,
@@ -291,7 +305,16 @@ export class GfAccountsPageComponent implements OnInit {
 
           this.dataService
             .postAccount(account)
-            .pipe(takeUntilDestroyed(this.destroyRef))
+            .pipe(
+              catchError(() => {
+                this.notificationService.alert({
+                  title: $localize`Oops, creating the account has failed.`
+                });
+
+                return EMPTY;
+              }),
+              takeUntilDestroyed(this.destroyRef)
+            )
             .subscribe(() => {
               this.userService
                 .get(true)

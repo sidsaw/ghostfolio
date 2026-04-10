@@ -64,7 +64,7 @@ import {
 } from '@ghostfolio/common/types';
 import { PerformanceCalculationType } from '@ghostfolio/common/types/performance-calculation-type.type';
 
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { REQUEST } from '@nestjs/core';
 import {
   Account,
@@ -100,8 +100,12 @@ const developedMarkets = require('../../assets/countries/developed-markets.json'
 const emergingMarkets = require('../../assets/countries/emerging-markets.json');
 const europeMarkets = require('../../assets/countries/europe-markets.json');
 
+const DETAILS_TIMEOUT_MS = 10_000;
+
 @Injectable()
 export class PortfolioService {
+  private readonly logger = new Logger(PortfolioService.name);
+
   public constructor(
     private readonly accountBalanceService: AccountBalanceService,
     private readonly accountService: AccountService,
@@ -158,6 +162,27 @@ export class PortfolioService {
       };
     }
 
+    const detailsPromise = Promise.race([
+      this.getDetails({
+        filters,
+        withExcludedAccounts,
+        impersonationId: userId,
+        userId: this.request.user.id
+      }),
+      new Promise<PortfolioDetails>((_, reject) =>
+        setTimeout(
+          () => reject(new Error('getDetails timed out')),
+          DETAILS_TIMEOUT_MS
+        )
+      )
+    ]).catch((error) => {
+      this.logger.warn(
+        `Failed to fetch portfolio details for user ${userId}: ${error.message}`
+      );
+
+      return { accounts: {} } as PortfolioDetails;
+    });
+
     const [accounts, details] = await Promise.all([
       this.accountService.accounts({
         where,
@@ -167,12 +192,7 @@ export class PortfolioService {
         },
         orderBy: { name: 'asc' }
       }),
-      this.getDetails({
-        filters,
-        withExcludedAccounts,
-        impersonationId: userId,
-        userId: this.request.user.id
-      })
+      detailsPromise
     ]);
 
     const userCurrency = this.request.user.settings.settings.baseCurrency;
