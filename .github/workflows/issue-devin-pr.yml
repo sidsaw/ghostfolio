@@ -90,7 +90,7 @@ jobs:
             '- PR title should be concise and descriptive.')
 
           echo "Creating Devin execution session for issue #${ISSUE_NUMBER} (devin:ready=${HAS_READY})..."
-          DEVIN_RESP=$(curl --silent --fail-with-body \
+          DEVIN_RESP=$(curl --silent \
             -X POST "https://api.devin.ai/v3/organizations/${DEVIN_ORG_ID}/sessions" \
             -H "Authorization: Bearer ${DEVIN_API_TOKEN}" \
             -H "Content-Type: application/json" \

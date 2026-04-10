@@ -111,7 +111,7 @@ jobs:
             'review comment, then stop. Do NOT approve or merge the PR.')
 
           echo "Creating Devin test session for PR #${PR_NUMBER}..."
-          DEVIN_RESP=$(curl --silent --fail-with-body \
+          DEVIN_RESP=$(curl --silent \
             -X POST "https://api.devin.ai/v3/organizations/${DEVIN_ORG_ID}/sessions" \
             -H "Authorization: Bearer ${DEVIN_API_TOKEN}" \
             -H "Content-Type: application/json" \

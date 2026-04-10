@@ -82,7 +82,7 @@ jobs:
             'Post exactly one comment summarising your decision and plan/needs. Then stop.')
 
           echo "Creating Devin review session for issue #${ISSUE_NUMBER}..."
-          DEVIN_RESP=$(curl --silent --fail-with-body \
+          DEVIN_RESP=$(curl --silent \
             -X POST "https://api.devin.ai/v3/organizations/${DEVIN_ORG_ID}/sessions" \
             -H "Authorization: Bearer ${DEVIN_API_TOKEN}" \
             -H "Content-Type: application/json" \
