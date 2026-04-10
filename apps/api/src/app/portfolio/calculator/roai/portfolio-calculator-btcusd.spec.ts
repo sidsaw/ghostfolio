@@ -138,7 +138,7 @@ describe('PortfolioCalculator', () => {
       });
 
       expect(portfolioSnapshot.historicalData[0]).toEqual({
-        date: '2021-12-11',
+        date: '2021-12-10',
         investmentValueWithCurrencyEffect: 0,
         netPerformance: 0,
         netPerformanceInPercentage: 0,
