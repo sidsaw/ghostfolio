@@ -162,19 +162,25 @@ export class PortfolioService {
       };
     }
 
+    let timeoutId: NodeJS.Timeout;
+
     const detailsPromise = Promise.race([
       this.getDetails({
         filters,
         withExcludedAccounts,
         impersonationId: userId,
         userId: this.request.user.id
+      }).then((result) => {
+        clearTimeout(timeoutId);
+
+        return result;
       }),
-      new Promise<PortfolioDetails>((_, reject) =>
-        setTimeout(
+      new Promise<PortfolioDetails>((_, reject) => {
+        timeoutId = setTimeout(
           () => reject(new Error('getDetails timed out')),
           DETAILS_TIMEOUT_MS
-        )
-      )
+        );
+      })
     ]).catch((error) => {
       this.logger.warn(
         `Failed to fetch portfolio details for user ${userId}: ${error.message}`

@@ -27,7 +27,7 @@ import { Account as AccountModel } from '@prisma/client';
 import { addIcons } from 'ionicons';
 import { addOutline } from 'ionicons/icons';
 import { DeviceDetectorService } from 'ngx-device-detector';
-import { EMPTY, of, Subscription } from 'rxjs';
+import { EMPTY, Subscription } from 'rxjs';
 import { catchError } from 'rxjs/operators';
 
 import { GfCreateOrUpdateAccountDialogComponent } from './create-or-update-account-dialog/create-or-update-account-dialog.component';
@@ -135,12 +135,7 @@ export class GfAccountsPageComponent implements OnInit {
             title: $localize`Oops, fetching accounts has failed.`
           });
 
-          return of({
-            accounts: [],
-            activitiesCount: 0,
-            totalBalanceInBaseCurrency: 0,
-            totalValueInBaseCurrency: 0
-          });
+          return EMPTY;
         }),
         takeUntilDestroyed(this.destroyRef)
       )
