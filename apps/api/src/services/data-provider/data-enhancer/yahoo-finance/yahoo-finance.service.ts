@@ -211,7 +211,11 @@ export class YahooFinanceDataEnhancerService implements DataEnhancerInterface {
         const expandedHoldings: { name: string; weight: number }[] = [];
 
         for (const holding of rawHoldings) {
-          if (holding.holdingName?.includes('ETF') && holding.symbol && depth < 1) {
+          if (
+            holding.holdingName?.includes('ETF') &&
+            holding.symbol &&
+            depth < 1
+          ) {
             // Recursively expand ETF sub-holdings (e.g. IVV.AX -> IVV -> NVDA, AAPL, ...)
             try {
               const subProfile = await this.getAssetProfile(
@@ -219,8 +223,10 @@ export class YahooFinanceDataEnhancerService implements DataEnhancerInterface {
                 depth + 1
               );
 
-              const subHoldings =
-                subProfile?.holdings as unknown as { name: string; weight: number }[];
+              const subHoldings = subProfile?.holdings as unknown as {
+                name: string;
+                weight: number;
+              }[];
 
               if (subHoldings?.length > 0) {
                 for (const subHolding of subHoldings) {
@@ -235,8 +241,10 @@ export class YahooFinanceDataEnhancerService implements DataEnhancerInterface {
                   assetProfile.topHoldings?.sectorWeightings ?? [];
 
                 if (wrapperSectors.length === 0) {
-                  const subSectors =
-                    subProfile?.sectors as unknown as { name: string; weight: number }[];
+                  const subSectors = subProfile?.sectors as unknown as {
+                    name: string;
+                    weight: number;
+                  }[];
 
                   if (subSectors?.length > 0) {
                     assetProfile.topHoldings = {
