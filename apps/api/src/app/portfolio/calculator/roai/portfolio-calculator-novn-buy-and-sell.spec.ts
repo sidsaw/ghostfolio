@@ -135,7 +135,7 @@ describe('PortfolioCalculator', () => {
       });
 
       expect(portfolioSnapshot.historicalData[0]).toEqual({
-        date: '2022-03-06',
+        date: '2022-03-04',
         investmentValueWithCurrencyEffect: 0,
         netPerformance: 0,
         netPerformanceInPercentage: 0,
@@ -153,7 +153,10 @@ describe('PortfolioCalculator', () => {
        * Closing price on 2022-03-07 is unknown,
        * hence it uses the last unit price (2022-04-11): 87.8
        */
-      expect(portfolioSnapshot.historicalData[1]).toEqual({
+      const firstActivityEntry = portfolioSnapshot.historicalData.find(
+        (entry) => entry.date === '2022-03-07'
+      );
+      expect(firstActivityEntry).toEqual({
         date: '2022-03-07',
         investmentValueWithCurrencyEffect: 151.6,
         netPerformance: 24, // 2 * (87.8 - 75.8) = 24

@@ -138,7 +138,7 @@ describe('PortfolioCalculator', () => {
       });
 
       expect(portfolioSnapshot.historicalData[0]).toEqual({
-        date: '2021-12-11',
+        date: '2021-12-10',
         investmentValueWithCurrencyEffect: 0,
         netPerformance: 0,
         netPerformanceInPercentage: 0,
@@ -155,7 +155,10 @@ describe('PortfolioCalculator', () => {
       /**
        * Closing price on 2021-12-12: 50098.3
        */
-      expect(portfolioSnapshot.historicalData[1]).toEqual({
+      const firstActivityEntry = portfolioSnapshot.historicalData.find(
+        (entry) => entry.date === '2021-12-12'
+      );
+      expect(firstActivityEntry).toEqual({
         date: '2021-12-12',
         investmentValueWithCurrencyEffect: 44558.42,
         netPerformance: 5535.42, // 1 * (50098.3 - 44558.42) - 4.46 = 5535.42

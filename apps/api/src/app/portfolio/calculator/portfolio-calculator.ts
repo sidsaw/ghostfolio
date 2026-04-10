@@ -51,8 +51,10 @@ import {
   format,
   isAfter,
   isBefore,
+  isWeekend,
   isWithinInterval,
   min,
+  previousFriday,
   startOfDay,
   startOfYear,
   subDays
@@ -158,9 +160,15 @@ export abstract class PortfolioCalculator {
     this.redisCacheService = redisCacheService;
     this.userId = userId;
 
+    let adjustedStartDate = subDays(dateOfFirstActivity, 1);
+
+    if (isWeekend(adjustedStartDate)) {
+      adjustedStartDate = previousFriday(adjustedStartDate);
+    }
+
     const { endDate, startDate } = getIntervalFromDateRange({
       dateRange: 'max',
-      startDate: subDays(dateOfFirstActivity, 1)
+      startDate: adjustedStartDate
     });
 
     this.endDate = endOfDay(endDate);
