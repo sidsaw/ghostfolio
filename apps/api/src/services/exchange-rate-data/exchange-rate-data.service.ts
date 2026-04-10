@@ -21,6 +21,8 @@ import {
   format,
   isBefore,
   isToday,
+  isWeekend,
+  previousFriday,
   subDays
 } from 'date-fns';
 import { isNumber } from 'lodash';
@@ -109,7 +111,11 @@ export class ExchangeRateDataService {
           exchangeRatesByCurrency[`${currency}${targetCurrency}`][dateString] =
             previousExchangeRate;
 
-          if (currency === DEFAULT_CURRENCY && isBefore(date, new Date())) {
+          if (
+            currency === DEFAULT_CURRENCY &&
+            isBefore(date, new Date()) &&
+            !isWeekend(date)
+          ) {
             Logger.error(
               `No exchange rate has been found for ${currency}${targetCurrency} at ${dateString}`,
               'ExchangeRateDataService'
@@ -288,10 +294,16 @@ export class ExchangeRateDataService {
         this.dataProviderService.getDataSourceForExchangeRates();
       const symbol = `${aFromCurrency}${aToCurrency}`;
 
+      let lookupDate = aDate;
+
+      if (isWeekend(lookupDate)) {
+        lookupDate = previousFriday(lookupDate);
+      }
+
       const marketData = await this.marketDataService.get({
         dataSource,
         symbol,
-        date: aDate
+        date: lookupDate
       });
 
       if (marketData?.marketPrice) {
@@ -309,7 +321,7 @@ export class ExchangeRateDataService {
             marketPriceBaseCurrencyFromCurrency = (
               await this.marketDataService.get({
                 dataSource,
-                date: aDate,
+                date: lookupDate,
                 symbol: `${DEFAULT_CURRENCY}${aFromCurrency}`
               })
             )?.marketPrice;
@@ -323,7 +335,7 @@ export class ExchangeRateDataService {
             marketPriceBaseCurrencyToCurrency = (
               await this.marketDataService.get({
                 dataSource,
-                date: aDate,
+                date: lookupDate,
                 symbol: `${DEFAULT_CURRENCY}${aToCurrency}`
               })
             )?.marketPrice;
@@ -474,16 +486,18 @@ export class ExchangeRateDataService {
             factors[format(date, DATE_FORMAT)] = factor;
           }
         } catch {
-          let errorMessage = `No exchange rate has been found for ${currencyFrom}${currencyTo} at ${format(
-            date,
-            DATE_FORMAT
-          )}. Please complement market data for ${DEFAULT_CURRENCY}${currencyFrom}`;
+          if (!isWeekend(date)) {
+            let errorMessage = `No exchange rate has been found for ${currencyFrom}${currencyTo} at ${format(
+              date,
+              DATE_FORMAT
+            )}. Please complement market data for ${DEFAULT_CURRENCY}${currencyFrom}`;
 
-          if (DEFAULT_CURRENCY !== currencyTo) {
-            errorMessage = `${errorMessage} and ${DEFAULT_CURRENCY}${currencyTo}`;
+            if (DEFAULT_CURRENCY !== currencyTo) {
+              errorMessage = `${errorMessage} and ${DEFAULT_CURRENCY}${currencyTo}`;
+            }
+
+            Logger.error(`${errorMessage}.`, 'ExchangeRateDataService');
           }
-
-          Logger.error(`${errorMessage}.`, 'ExchangeRateDataService');
         }
       }
     }
