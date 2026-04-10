@@ -161,7 +161,8 @@ export class YahooFinanceDataEnhancerService implements DataEnhancerInterface {
   }
 
   public async getAssetProfile(
-    aSymbol: string
+    aSymbol: string,
+    depth = 0
   ): Promise<Partial<SymbolProfile>> {
     let response: Partial<SymbolProfile> = {};
 
@@ -206,17 +207,71 @@ export class YahooFinanceDataEnhancerService implements DataEnhancerInterface {
       );
 
       if (['ETF', 'MUTUALFUND'].includes(assetSubClass)) {
-        response.holdings =
-          assetProfile.topHoldings?.holdings
-            ?.filter(({ holdingName }) => {
-              return !holdingName?.includes('ETF');
-            })
-            ?.map(({ holdingName, holdingPercent }) => {
-              return {
-                name: this.formatName({ longName: holdingName }),
-                weight: holdingPercent
-              };
-            }) ?? [];
+        const rawHoldings = assetProfile.topHoldings?.holdings ?? [];
+        const expandedHoldings: { name: string; weight: number }[] = [];
+
+        for (const holding of rawHoldings) {
+          if (
+            holding.holdingName?.includes('ETF') &&
+            holding.symbol &&
+            depth < 1
+          ) {
+            // Recursively expand ETF sub-holdings (e.g. IVV.AX -> IVV -> NVDA, AAPL, ...)
+            try {
+              const subProfile = await this.getAssetProfile(
+                holding.symbol,
+                depth + 1
+              );
+
+              const subHoldings = this.parseHoldings(
+                subProfile?.holdings as Prisma.JsonValue
+              );
+
+              if (subHoldings.length > 0) {
+                for (const subHolding of subHoldings) {
+                  expandedHoldings.push({
+                    name: subHolding.name,
+                    weight: subHolding.weight * holding.holdingPercent
+                  });
+                }
+
+                // Merge sectors from the underlying ETF if the wrapper has none
+                const wrapperSectors =
+                  assetProfile.topHoldings?.sectorWeightings ?? [];
+
+                if (wrapperSectors.length === 0) {
+                  const subSectors = this.parseHoldings(
+                    subProfile?.sectors as Prisma.JsonValue
+                  );
+
+                  if (subSectors.length > 0) {
+                    assetProfile.topHoldings = {
+                      ...assetProfile.topHoldings,
+                      sectorWeightings:
+                        subProfile.sectors as unknown as typeof assetProfile.topHoldings.sectorWeightings
+                    };
+                  }
+                }
+
+                continue;
+              }
+            } catch (error) {
+              Logger.warn(
+                `Failed to expand ETF sub-holding ${holding.symbol}: ${error.message}`,
+                'YahooFinanceDataEnhancerService'
+              );
+            }
+          }
+
+          // Include non-ETF holdings directly, and ETF holdings as-is when
+          // expansion was skipped (depth >= 1) or failed
+          expandedHoldings.push({
+            name: this.formatName({ longName: holding.holdingName }),
+            weight: holding.holdingPercent
+          });
+        }
+
+        response.holdings = expandedHoldings;
 
         response.sectors = (
           assetProfile.topHoldings?.sectorWeightings ?? []
@@ -326,6 +381,27 @@ export class YahooFinanceDataEnhancerService implements DataEnhancerInterface {
     }
 
     return { assetClass, assetSubClass };
+  }
+
+  private parseHoldings(
+    aJsonValue: Prisma.JsonValue
+  ): { name: string; weight: number }[] {
+    if (!Array.isArray(aJsonValue)) {
+      return [];
+    }
+
+    return aJsonValue.filter(
+      (item): item is { name: string; weight: number } => {
+        return (
+          item !== null &&
+          typeof item === 'object' &&
+          'name' in item &&
+          typeof (item as Record<string, unknown>).name === 'string' &&
+          'weight' in item &&
+          typeof (item as Record<string, unknown>).weight === 'number'
+        );
+      }
+    );
   }
 
   private parseSector(aString: string) {
