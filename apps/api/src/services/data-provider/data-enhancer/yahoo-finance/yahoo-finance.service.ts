@@ -161,7 +161,8 @@ export class YahooFinanceDataEnhancerService implements DataEnhancerInterface {
   }
 
   public async getAssetProfile(
-    aSymbol: string
+    aSymbol: string,
+    depth = 0
   ): Promise<Partial<SymbolProfile>> {
     let response: Partial<SymbolProfile> = {};
 
@@ -206,17 +207,75 @@ export class YahooFinanceDataEnhancerService implements DataEnhancerInterface {
       );
 
       if (['ETF', 'MUTUALFUND'].includes(assetSubClass)) {
-        response.holdings =
-          assetProfile.topHoldings?.holdings
-            ?.filter(({ holdingName }) => {
-              return !holdingName?.includes('ETF');
-            })
-            ?.map(({ holdingName, holdingPercent }) => {
-              return {
-                name: this.formatName({ longName: holdingName }),
-                weight: holdingPercent
-              };
-            }) ?? [];
+        const rawHoldings = assetProfile.topHoldings?.holdings ?? [];
+        const expandedHoldings: { name: string; weight: number }[] = [];
+
+        for (const holding of rawHoldings) {
+          if (holding.holdingName?.includes('ETF') && holding.symbol && depth < 1) {
+            // Recursively expand ETF sub-holdings (e.g. IVV.AX -> IVV -> NVDA, AAPL, ...)
+            try {
+              const subProfile = await this.getAssetProfile(
+                holding.symbol,
+                depth + 1
+              );
+
+              const subHoldings =
+                subProfile?.holdings as unknown as { name: string; weight: number }[];
+
+              if (subHoldings?.length > 0) {
+                for (const subHolding of subHoldings) {
+                  expandedHoldings.push({
+                    name: subHolding.name,
+                    weight: subHolding.weight * holding.holdingPercent
+                  });
+                }
+
+                // Merge sectors from the underlying ETF if the wrapper has none
+                const wrapperSectors =
+                  assetProfile.topHoldings?.sectorWeightings ?? [];
+
+                if (wrapperSectors.length === 0) {
+                  const subSectors =
+                    subProfile?.sectors as unknown as { name: string; weight: number }[];
+
+                  if (subSectors?.length > 0) {
+                    assetProfile.topHoldings = {
+                      ...assetProfile.topHoldings,
+                      sectorWeightings:
+                        subProfile.sectors as unknown as typeof assetProfile.topHoldings.sectorWeightings
+                    };
+                  }
+                }
+
+                continue;
+              }
+            } catch (error) {
+              Logger.warn(
+                `Failed to expand ETF sub-holding ${holding.symbol}: ${error.message}`,
+                'YahooFinanceDataEnhancerService'
+              );
+            }
+
+            // Fallback: include the ETF holding as-is rather than dropping it
+            expandedHoldings.push({
+              name: this.formatName({ longName: holding.holdingName }),
+              weight: holding.holdingPercent
+            });
+          } else if (!holding.holdingName?.includes('ETF')) {
+            expandedHoldings.push({
+              name: this.formatName({ longName: holding.holdingName }),
+              weight: holding.holdingPercent
+            });
+          } else {
+            // depth >= 1 and holding is an ETF: include as-is to avoid infinite recursion
+            expandedHoldings.push({
+              name: this.formatName({ longName: holding.holdingName }),
+              weight: holding.holdingPercent
+            });
+          }
+        }
+
+        response.holdings = expandedHoldings;
 
         response.sectors = (
           assetProfile.topHoldings?.sectorWeightings ?? []
