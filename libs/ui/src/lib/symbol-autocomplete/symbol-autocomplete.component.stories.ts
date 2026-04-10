@@ -1,4 +1,5 @@
 import { LookupItem } from '@ghostfolio/common/interfaces';
+import { DataService } from '@ghostfolio/ui/services';
 
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
@@ -11,6 +12,7 @@ import {
 } from '@angular/forms';
 import { provideNoopAnimations } from '@angular/platform-browser/animations';
 import { applicationConfig, Meta, StoryObj } from '@storybook/angular';
+import { of } from 'rxjs';
 
 import { HttpClientMock } from '../mocks/httpClient.mock';
 import { GfSymbolAutocompleteComponent } from './symbol-autocomplete.component';
@@ -96,6 +98,12 @@ export default {
               ]
             ])
           )
+        },
+        {
+          provide: DataService,
+          useValue: {
+            fetchSymbols: () => of(FILTERED_OPTIONS)
+          }
         }
       ]
     })
